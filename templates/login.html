@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>登录</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- 适配移动端 -->
+    <style>
+        /* 全局样式重置与基础设置 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* 现代无衬线字体 */
+        }
+
+        /* 页面背景：柔和渐变 */
+        body {
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            padding: 20px; /* 移动端留白 */
+        }
+
+        /* 登录容器：卡片式设计 */
+        .login-container {
+            width: 100%;
+            max-width: 420px; /* 最大宽度限制 */
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(149, 157, 165, 0.2); /* 柔和阴影 */
+            padding: 40px 30px;
+        }
+
+        /* 标题样式 */
+        .login-container h1 {
+            text-align: center;
+            color: #263238;
+            margin-bottom: 30px;
+            font-weight: 600;
+            font-size: 24px;
+        }
+
+        /* 闪现消息样式（区分成功/错误） */
+        .flash {
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            text-align: center;
+        }
+        .flash.error { /* 错误消息（如账号密码错误） */
+            background-color: #fff8f8;
+            color: #d32f2f;
+            border: 1px solid #ffccd5;
+        }
+        .flash.success { /* 成功消息（如跳转提示） */
+            background-color: #f0fff4;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
+
+        /* 表单组：标签+输入框组合 */
+        .form-group {
+            margin-bottom: 22px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #455a64;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        /* 输入框样式 */
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 15px;
+            color: #263238;
+            transition: all 0.3s ease; /* 过渡动画 */
+        }
+
+        /* 输入框交互反馈 */
+        .form-group input:focus {
+            outline: none;
+            border-color: #64b5f6; /* 聚焦时蓝色边框 */
+            box-shadow: 0 0 0 3px rgba(100, 181, 246, 0.15); /* 聚焦光晕 */
+        }
+        .form-group input::placeholder { /* 占位符样式（若需添加） */
+            color: #90a4ae;
+            font-size: 14px;
+        }
+
+        /* 登录按钮样式 */
+        .login-btn {
+            width: 100%;
+            padding: 13px;
+            background: linear-gradient(45deg, #2196f3 0%, #1976d2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .login-btn:hover {
+            background: linear-gradient(45deg, #1976d2 0%, #1565c0 100%);
+            transform: translateY(-2px); /* hover时轻微上浮 */
+        }
+        .login-btn:active {
+            transform: translateY(0); /* 点击时复位 */
+            box-shadow: 0 4px 8px rgba(33, 150, 243, 0.3); /* 点击时阴影 */
+        }
+
+        /* 移动端适配（小屏幕优化） */
+        @media (max-width: 480px) {
+            .login-container {
+                padding: 30px 20px;
+                box-shadow: 0 4px 16px rgba(149, 157, 165, 0.15);
+            }
+            .login-container h1 {
+                font-size: 22px;
+                margin-bottom: 25px;
+            }
+            .form-group {
+                margin-bottom: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>请登录</h1>
+        
+        <!-- 闪现消息（保留原逻辑，新增样式区分） -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+        
+        <!-- 登录表单（结构不变，样式通过CSS控制） -->
+        <form method="post">
+            <div class="form-group">
+                <label for="username">用户名:</label>
+                <input type="text" id="username" name="username" required placeholder="请输入用户名">
+            </div>
+            <div class="form-group">
+                <label for="password">密码:</label>
+                <input type="password" id="password" name="password" required placeholder="请输入密码">
+            </div>
+            <div>
+                <button type="submit" class="login-btn">登录</button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>
