@@ -4,3 +4,4 @@ Pillow
 requests
 webdavclient3
 Werkzeug
+opencv-python
