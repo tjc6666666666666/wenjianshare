@@ -2,6 +2,7 @@ import os
 import re
 import time
 import uuid
+import cv2  # 新增：处理视频帧
 import requests
 from datetime import datetime, timedelta
 from PIL import Image
@@ -34,7 +35,7 @@ ALIST_CONFIG = {
 
 # 本地缩略图配置
 THUMBNAIL_DIR = os.path.join(app.static_folder, 'thumbnails')  # 缩略图存储路径
-THUMBNAIL_MAX_SIZE = 200  # 缩略图最大边尺寸（px）
+THUMBNAIL_MAX_SIZE = 200  # 缩略图最大边尺寸（px）- 满足需求
 
 # 允许的文件类型
 ALLOWED_EXTENSIONS = {
@@ -60,13 +61,13 @@ webdav_client = Client({
 webdav_client.verify = False  # 忽略SSL验证（本地Alist可开启）
 webdav_client.timeout = 30    # 延长超时时间（避免大文件上传超时）
 
-# -------------------------- 3. 数据库模型（新增upload_cookie字段） --------------------------
+# -------------------------- 3. 数据库模型（无需修改，兼容原有结构） --------------------------
 class File(db.Model):
     id = db.Column(db.Integer, primary_key=True)  # 主键
     original_filename = db.Column(db.String(255), nullable=False)  # 原始文件名（支持中文）
     file_type = db.Column(db.String(50), nullable=False)  # 文件类型（image/video/zip等）
     alist_path = db.Column(db.String(512), nullable=False)  # Alist中的存储路径（含中文）
-    thumbnail_path = db.Column(db.String(512), nullable=True)  # 本地缩略图路径（仅图片有）
+    thumbnail_path = db.Column(db.String(512), nullable=True)  # 本地缩略图路径（图片/视频共用）
     upload_time = db.Column(db.DateTime, default=datetime.utcnow)  # 上传时间（UTC）
     file_size = db.Column(db.Integer, nullable=False)  # 文件大小（字节）
     remark = db.Column(db.Text, nullable=True)  # 文件备注（如压缩包密码）
@@ -79,7 +80,7 @@ class File(db.Model):
 with app.app_context():
     db.create_all()
 
-# -------------------------- 4. 工具函数 --------------------------
+# -------------------------- 4. 工具函数（修复视频封面处理函数参数顺序） --------------------------
 # 自定义文件名清洗函数（保留中文，过滤不安全字符）
 def clean_filename(filename):
     if not filename:
@@ -124,18 +125,65 @@ def get_date_dir():
     now = datetime.now()
     return f'{now.year}/{now.month:02d}/{now.day:02d}'
 
-# 生成图片缩略图
+
+# 生成图片/视频封面缩略图（最大边200px）
 def generate_thumbnail(local_file_path, save_dir):
     try:
         with Image.open(local_file_path) as img:
-            img.thumbnail((THUMBNAIL_MAX_SIZE, THUMBNAIL_MAX_SIZE))
+            img.thumbnail((THUMBNAIL_MAX_SIZE, THUMBNAIL_MAX_SIZE))  # 固定最大边200px
             filename = clean_filename(os.path.basename(local_file_path))
+            # 统一缩略图为JPG格式（避免兼容性问题）
+            if not filename.endswith(('.jpg', '.jpeg')):
+                filename = os.path.splitext(filename)[0] + '.jpg'
             save_path = os.path.join(save_dir, filename)
             os.makedirs(save_dir, exist_ok=True)
-            img.save(save_path)
-            return save_path
+            # 处理透明背景（如PNG）
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+            img.save(save_path, 'JPEG', quality=85)
+            
+            # 关键修复：强制计算相对于static目录的相对路径
+            relative_path = os.path.relpath(save_path, app.static_folder)
+            return relative_path  # 现在返回的是 "thumbnails/2025/09/23/xxx.jpg" 格式
     except Exception as e:
         app.logger.error(f'生成缩略图失败: {str(e)}')
+        return None
+
+
+# 修复：调整参数顺序，将没有默认值的temp_dir放在前面
+def generate_video_cover(source_path, temp_dir, is_video=True):
+    """
+    生成视频封面
+    :param source_path: 视频路径（is_video=True）或用户上传封面路径（is_video=False）
+    :param temp_dir: 临时文件目录
+    :param is_video: 是否从视频取帧（True=视频第一帧，False=用户上传封面）
+    :return: 封面临时路径（JPG），失败返回None
+    """
+    cover_temp_path = os.path.join(temp_dir, f"cover_{uuid.uuid4().hex}.jpg")
+    try:
+        if is_video:
+            # 从视频读取第一帧
+            cap = cv2.VideoCapture(source_path)
+            if not cap.isOpened():
+                app.logger.error(f"无法打开视频: {source_path}")
+                return None
+            ret, frame = cap.read()  # 读取第一帧
+            cap.release()  # 释放资源
+            if not ret:
+                app.logger.error(f"无法读取视频第一帧: {source_path}")
+                return None
+            cv2.imwrite(cover_temp_path, frame)  # 保存为JPG
+        else:
+            # 用用户上传的封面生成JPG格式
+            with Image.open(source_path) as img:
+                if img.mode in ('RGBA', 'P'):
+                    img = img.convert('RGB')
+                img.save(cover_temp_path, 'JPEG', quality=85)
+        return cover_temp_path
+    except Exception as e:
+        app.logger.error(f"生成视频封面失败: {str(e)}")
+        if os.path.exists(cover_temp_path):
+            os.remove(cover_temp_path)
         return None
 
 # 递归创建Alist多级目录
@@ -190,7 +238,7 @@ def get_or_set_upload_cookie():
         upload_cookie = str(uuid.uuid4().hex)
     return upload_cookie
 
-# -------------------------- 5. 路由功能（新增删除路由+权限控制） --------------------------
+# -------------------------- 5. 路由功能（修改上传逻辑，新增视频封面处理） --------------------------
 # 登录路由（新增管理员身份识别）
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -247,7 +295,7 @@ def index():
                            is_admin=session.get('is_admin', False),
                            current_cookie=current_cookie)
 
-# 文件上传路由（新增Cookie记录）
+# 文件上传路由（新增视频封面处理+Cookie记录）
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload_file():
@@ -257,6 +305,7 @@ def upload_file():
     
     files = request.files.getlist('files')
     remarks = request.form.getlist('remarks')
+    cover_files = request.files.getlist('cover_files')  # 新增：接收视频封面文件
     date_dir = get_date_dir()
     # 获取/生成上传Cookie
     upload_cookie = get_or_set_upload_cookie()
@@ -279,35 +328,66 @@ def upload_file():
             continue
         
         file_remark = remarks[idx].strip() if idx < len(remarks) else None
+        file_category = get_file_category(original_filename)
+        thumbnail_path = None  # 图片/视频共用此字段
         
         try:
-            # 临时保存文件
+            # 1. 保存原始文件到临时目录
             temp_dir = os.path.join(app.root_path, 'temp')
             os.makedirs(temp_dir, exist_ok=True)
             temp_file_path = os.path.join(temp_dir, cleaned_filename)
             file.save(temp_file_path)
             file_size = os.path.getsize(temp_file_path)
             
-            # 上传到Alist
+            # 2. 处理视频封面（图片直接用原文件生成缩略图）
+            cover_temp_path = None
+            if file_category == 'video':
+                # 获取当前视频对应的封面文件（用户可选）
+                cover_file = cover_files[idx] if idx < len(cover_files) else None
+                if cover_file and cover_file.filename:
+                    # 用用户上传的封面
+                    user_cover_path = os.path.join(temp_dir, f"user_cover_{cleaned_filename}")
+                    cover_file.save(user_cover_path)
+                    # 修复：调整参数顺序，将temp_dir作为第二个参数传入
+                    cover_temp_path = generate_video_cover(
+                        source_path=user_cover_path, 
+                        temp_dir=temp_dir,
+                        is_video=False
+                    )
+                    # 清理用户上传的原始封面
+                    if os.path.exists(user_cover_path):
+                        os.remove(user_cover_path)
+                else:
+                    # 无封面，用视频第一帧
+                    # 修复：调整参数顺序，将temp_dir作为第二个参数传入
+                    cover_temp_path = generate_video_cover(
+                        source_path=temp_file_path, 
+                        temp_dir=temp_dir,
+                        is_video=True
+                    )
+            
+            # 3. 生成缩略图（图片/视频统一处理，最大边200px）
+            if file_category == 'image':
+                thumbnail_save_dir = os.path.join(THUMBNAIL_DIR, date_dir)
+                thumbnail_path = generate_thumbnail(temp_file_path, thumbnail_save_dir)
+            elif file_category == 'video' and cover_temp_path:
+                thumbnail_save_dir = os.path.join(THUMBNAIL_DIR, date_dir)
+                thumbnail_path = generate_thumbnail(cover_temp_path, thumbnail_save_dir)
+                # 清理封面临时文件
+                if os.path.exists(cover_temp_path):
+                    os.remove(cover_temp_path)
+            
+            # 4. 上传原始文件到Alist
             alist_file_path = f"{date_dir}/{cleaned_filename}"
             webdav_client.upload(remote_path=alist_file_path, local_path=temp_file_path)
             app.logger.info(f'文件上传Alist成功: {alist_file_path}')
             
-            # 生成缩略图
-            thumbnail_path = None
-            file_category = get_file_category(original_filename)
-            if file_category == 'image':
-                thumbnail_save_dir = os.path.join(THUMBNAIL_DIR, date_dir)
-                thumbnail_path = generate_thumbnail(temp_file_path, thumbnail_save_dir)
-                if thumbnail_path:
-                    thumbnail_path = os.path.relpath(thumbnail_path, app.static_folder)
-            
-            # 保存到数据库（含upload_cookie）
+            # 5. 保存到数据库（复用thumbnail_path字段，兼容原有结构）
             new_file = File(
                 original_filename=original_filename,
                 file_type=file_category,
                 alist_path=alist_file_path,
-                thumbnail_path=thumbnail_path,
+                thumbnail_path=thumbnail_path,  # 视频封面缩略图路径
                 file_size=file_size,
                 remark=file_remark,
                 upload_cookie=upload_cookie  # 记录上传Cookie
@@ -325,7 +405,7 @@ def upload_file():
             flash(f'文件 {original_filename} 处理失败: {str(e)}', 'error')
             app.logger.error(f'文件 {original_filename} 处理失败: {str(e)}')
         finally:
-            # 清理临时文件
+            # 清理原始文件临时文件
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
     
