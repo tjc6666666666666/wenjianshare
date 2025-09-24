@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>文件管理系统（含删除功能）</title>
+    <title>文件管理系统（含视频封面功能）</title>
     <style>
         * {
             margin: 0;
@@ -134,9 +134,10 @@
         
         .file-remark-item {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             padding: 8px 0;
             border-bottom: 1px dashed #eee;
+            flex-wrap: wrap;
         }
         
         .file-remark-item:last-child {
@@ -151,6 +152,7 @@
             text-overflow: ellipsis;
             white-space: nowrap;
             margin-right: 15px;
+            margin-top: 5px;
         }
         
         .remark-input {
@@ -159,6 +161,16 @@
             border: 1px solid #ddd;
             border-radius: 4px;
             font-size: 14px;
+            margin-right: 15px;
+        }
+        
+        .cover-upload {
+            flex: 1.5;
+            margin-top: 5px;
+        }
+        
+        .cover-upload input {
+            margin-top: 5px;
         }
         
         .upload-btn {
@@ -217,10 +229,49 @@
             justify-content: center;
             background: #f8f8f8;
             overflow: hidden;
+            position: relative;
+        }
+        
+        /* 视频缩略图容器 */
+        .video-thumbnail-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .video-thumbnail-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        /* 视频播放按钮 */
+        .video-play-btn {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+            transition: background 0.3s;
+        }
+        
+        .video-play-btn:hover {
+            background: rgba(0, 0, 0, 0.8);
         }
         
         .file-thumbnail img,
-        .file-thumbnail video {
+        .file-thumbnail svg {
             width: 100%;
             height: 100%;
             object-fit: cover;
@@ -314,7 +365,7 @@
             color: white;
         }
         
-        /* 模态框（查看原图） */
+        /* 图片模态框 */
         .modal-overlay {
             position: fixed;
             top: 0;
@@ -357,13 +408,62 @@
         .modal-close:hover {
             color: #ddd;
         }
+
+        /* 视频模态框样式 */
+        .video-modal-content {
+            max-width: 90%;
+            max-height: 90vh;
+            width: auto;
+            height: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .video-modal-header {
+            width: 100%;
+            text-align: center;
+            margin-bottom: 10px;
+            color: #fff;
+            font-size: 16px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .modal-video {
+            width: 100%;
+            height: auto;
+            max-height: 80vh;
+            object-fit: contain; /* 保持视频比例，不拉伸 */
+            background-color: #000;
+            border-radius: 4px;
+        }
+
+        /* 视频全屏样式：确保全屏时仍保持比例 */
+        .modal-video::fullscreen {
+            object-fit: contain;
+            background-color: #000;
+        }
+        .modal-video:-webkit-full-screen {
+            object-fit: contain;
+            background-color: #000;
+        }
+        .modal-video:-moz-full-screen {
+            object-fit: contain;
+            background-color: #000;
+        }
+        .modal-video:-ms-fullscreen {
+            object-fit: contain;
+            background-color: #000;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <!-- 头部（标题+登出） -->
         <div class="header">
-            <h1>文件管理系统（含删除功能）</h1>
+            <h1>文件管理系统（含视频封面功能）</h1>
             <a href="{{ url_for('logout') }}" class="logout-btn">登出</a>
         </div>
         
@@ -388,7 +488,7 @@
             {% endwith %}
         </div>
         
-        <!-- 上传区域 -->
+        <!-- 上传区域（新增视频封面选择） -->
         <div class="upload-section">
             <form action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data" id="uploadForm">
                 <div class="form-group">
@@ -396,14 +496,14 @@
                     <input type="file" name="files" multiple accept="image/*,video/*,.zip,.7z,.rar,.tar" id="fileInput">
                     
                     <div class="file-remark-list" id="fileRemarkList" style="display: none;">
-                        <!-- JS动态生成备注输入框 -->
+                        <!-- JS动态生成备注+视频封面输入框 -->
                     </div>
                 </div>
                 <button type="submit" class="upload-btn">上传文件</button>
             </form>
         </div>
         
-        <!-- 文件列表 -->
+        <!-- 文件列表（修改视频显示逻辑：仅显示缩略图，点击打开模态框） -->
         {% if files %}
             <div class="file-gallery">
                 {% for file in files %}
@@ -419,10 +519,26 @@
                                      alt="{{ file.original_filename }}"
                                      data-file-id="{{ file.id }}">
                             {% elif file.file_type == 'video' %}
-                                <video controls preload="metadata">
-                                    <source src="{{ url_for('redirect_to_cloud', file_id=file.id) }}" type="video/mp4">
-                                    您的浏览器不支持视频播放
-                                </video>
+                                <!-- 视频：仅显示缩略图和播放按钮，点击打开模态框 -->
+                                <div class="video-thumbnail-container" data-file-id="{{ file.id }}" data-file-name="{{ file.original_filename }}">
+                                    {% if file.thumbnail_path %}
+                                        <!-- 新视频：显示封面缩略图 -->
+                                        <img src="{{ url_for('static', filename=file.thumbnail_path) }}" 
+                                             alt="{{ file.original_filename }}">
+                                    {% else %}
+                                        <!-- 旧视频：显示默认图标 -->
+                                        <svg style="width: 80px; height: 80px; color: #95a5a6;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                                            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                                        </svg>
+                                    {% endif %}
+                                    <!-- 播放按钮 -->
+                                    <div class="video-play-btn">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                                        </svg>
+                                    </div>
+                                </div>
                             {% elif file.file_type == 'zip' %}
                                 <svg class="zip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M21 15V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v7a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 15z"></path>
@@ -500,8 +616,17 @@
         </div>
     </div>
 
+    <!-- 视频模态框 -->
+    <div class="modal-overlay" id="videoModal">
+        <div class="modal-content video-modal-content">
+            <div class="video-modal-header" id="videoModalTitle">视频播放</div>
+            <button class="modal-close" id="closeVideoModal">&times;</button>
+            <video class="modal-video" controls preload="metadata"></video>
+        </div>
+    </div>
+
     <script>
-        // 1. 动态生成文件备注输入框
+        // 1. 动态生成文件备注+视频封面输入框
         const fileInput = document.getElementById('fileInput');
         const fileRemarkList = document.getElementById('fileRemarkList');
         
@@ -511,12 +636,28 @@
             
             if (files.length > 0) {
                 fileRemarkList.style.display = 'block';
-                Array.from(files).forEach(file => {
+                Array.from(files).forEach((file, idx) => {
+                    const fileName = file.name;
+                    const fileExt = fileName.split('.').pop().toLowerCase();
+                    const isVideo = ['mp4', 'mov', 'avi'].includes(fileExt);
+                    
+                    // 视频文件增加封面上传选项
+                    let coverUploadHtml = '';
+                    if (isVideo) {
+                        coverUploadHtml = `
+                            <div class="cover-upload">
+                                <label style="font-size: 12px; color: #666;">视频封面（可选）：</label>
+                                <input type="file" name="cover_files" accept="image/*" style="width: 100%;">
+                            </div>
+                        `;
+                    }
+                    
                     const item = document.createElement('div');
                     item.className = 'file-remark-item';
                     item.innerHTML = `
-                        <div class="file-name-display">${file.name}</div>
+                        <div class="file-name-display">${fileName}</div>
                         <input type="text" class="remark-input" name="remarks" placeholder="输入备注（如压缩包密码）">
+                        ${coverUploadHtml}
                     `;
                     fileRemarkList.appendChild(item);
                 });
@@ -525,10 +666,10 @@
             }
         });
         
-        // 2. 模态框逻辑
-        const modal = document.getElementById('imageModal');
+        // 2. 图片模态框逻辑
+        const imageModal = document.getElementById('imageModal');
         const modalImg = document.getElementById('modalImage');
-        const closeBtn = document.getElementById('closeModal');
+        const closeImgModal = document.getElementById('closeModal');
         
         // 图片查看
         document.querySelectorAll('.file-card[data-file-type="image"]').forEach(card => {
@@ -538,23 +679,93 @@
                 const fileId = card.getAttribute('data-file-id');
                 const originalUrl = "/file/" + fileId;
                 modalImg.src = originalUrl;
-                modal.style.display = 'flex';
+                imageModal.style.display = 'flex';
             });
         });
         
-        // 视频/压缩包跳转
-        document.querySelectorAll('.file-card[data-file-type="zip"], .file-card[data-file-type="video"]').forEach(card => {
+        // 关闭图片模态框
+        closeImgModal.addEventListener('click', () => imageModal.style.display = 'none');
+        imageModal.addEventListener('click', (e) => e.target === imageModal && (imageModal.style.display = 'none'));
+
+        // 3. 视频模态框核心逻辑
+        const videoModal = document.getElementById('videoModal');
+        const modalVideo = document.querySelector('.modal-video');
+        const closeVideoModal = document.getElementById('closeVideoModal');
+        const videoModalTitle = document.getElementById('videoModalTitle');
+        
+        // 视频地址缓存：key=fileId, value=videoUrl（避免重复获取）
+        const videoUrlCache = {};
+        // 当前播放的视频ID（用于标记缓存）
+        let currentVideoId = null;
+
+        // 视频卡片点击事件：打开模态框
+        document.querySelectorAll('.video-thumbnail-container').forEach(container => {
+            container.addEventListener('click', (e) => {
+                // 点击复选框不触发
+                if (e.target.type === 'checkbox') return;
+
+                // 获取视频ID和文件名
+                const fileId = container.getAttribute('data-file-id');
+                const fileName = container.getAttribute('data-file-name');
+                // 生成视频地址
+                const videoUrl = "/file/" + fileId;
+
+                // 更新当前视频信息
+                currentVideoId = fileId;
+                videoModalTitle.textContent = fileName;
+
+                // 缓存视频地址（首次获取后永久保存，直到页面刷新）
+                if (!videoUrlCache[fileId]) {
+                    videoUrlCache[fileId] = videoUrl;
+                }
+
+                // 设置视频源（使用缓存的地址）
+                modalVideo.src = videoUrlCache[fileId];
+
+                // 显示视频模态框
+                videoModal.style.display = 'flex';
+
+                // 尝试自动播放（可选，也可让用户手动点击播放）
+                modalVideo.play().catch(err => {
+                    console.error('视频播放初始化失败:', err);
+                    alert('视频加载失败，请稍后重试');
+                });
+            });
+        });
+
+        // 关闭视频模态框：暂停视频，不清除地址（保持缓存）
+        function closeVideoModalHandler() {
+            // 暂停视频（避免后台继续播放）
+            modalVideo.pause();
+            // 隐藏模态框（不清除src，下次打开直接用缓存）
+            videoModal.style.display = 'none';
+        }
+
+        // 关闭视频模态框的多种触发方式
+        closeVideoModal.addEventListener('click', closeVideoModalHandler);
+        videoModal.addEventListener('click', (e) => {
+            if (e.target === videoModal) closeVideoModalHandler();
+        });
+
+        // 4. ESC键统一关闭所有模态框
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if (imageModal.style.display === 'flex') {
+                    imageModal.style.display = 'none';
+                } else if (videoModal.style.display === 'flex') {
+                    closeVideoModalHandler();
+                }
+            }
+        });
+
+        // 5. 压缩包跳转逻辑
+        document.querySelectorAll('.file-card[data-file-type="zip"]').forEach(card => {
             card.addEventListener('click', (e) => {
                 if (e.target.type === 'checkbox') return;
                 const fileId = card.getAttribute('data-file-id');
                 window.location.href = "/file/" + fileId;
             });
         });
-        
-        // 关闭模态框
-        closeBtn.addEventListener('click', () => modal.style.display = 'none');
-        modal.addEventListener('click', (e) => e.target === modal && (modal.style.display = 'none'));
-        document.addEventListener('keydown', (e) => e.key === 'Escape' && (modal.style.display = 'none'));
     </script>
 </body>
 </html>
